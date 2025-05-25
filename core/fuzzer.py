@@ -2,6 +2,7 @@ import copy
 from random import randint
 from time import sleep
 from urllib.parse import unquote
+import requests
 
 from core.colors import end, red, green, yellow
 from core.config import fuzzes, xsschecker
@@ -22,32 +23,43 @@ def fuzzer(url, params, headers, GET, delay, timeout, WAF, encoding):
             if encoding:
                 fuzz = encoding(unquote(fuzz))
             data = replaceValue(params, xsschecker, fuzz, copy.deepcopy)
-            response = requester(url, data, headers, GET, delay/2, timeout)
-        except:
-            logger.error('WAF is dropping suspicious requests.')
+            response = requester(url, data, headers, GET, delay / 2, timeout)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+                requests.exceptions.RequestException) as e:
+            logger.error(f"Network error during fuzzing: {str(e)}")
+            logger.error("WAF is dropping suspicious requests.")
             if delay == 0:
-                logger.info('Delay has been increased to %s6%s seconds.' % (green, end))
+                logger.info(f"Delay has been increased to {green}6{end} seconds.")
                 delay += 6
             limit = (delay + 1) * 50
             timer = -1
             while timer < limit:
-                logger.info('\rFuzzing will continue after %s%i%s seconds.\t\t\r' % (green, limit, end))
+                logger.info(
+                    f"\rFuzzing will continue after {green}{limit}{end} seconds.\t\t\r"
+                )
                 limit -= 1
                 sleep(1)
             try:
                 requester(url, params, headers, GET, 0, 10)
-                logger.good('Pheww! Looks like sleeping for %s%i%s seconds worked!' % (
-                    green, ((delay + 1) * 2), end))
-            except:
-                logger.error('\nLooks like WAF has blocked our IP Address. Sorry!')
+                logger.good(
+                    f"Pheww! Looks like sleeping for {green}{((delay + 1) * 2)}{end} seconds worked!"
+                )
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+                    requests.exceptions.RequestException):
+                logger.error("\nLooks like WAF has blocked our IP Address. Sorry!")
                 break
+        except Exception as e:
+            logger.error(f"Unexpected error during fuzzing: {str(e)}")
+            continue
         if encoding:
             fuzz = encoding(fuzz)
-        if fuzz.lower() in response.text.lower():  # if fuzz string is reflected in the response
-            result = ('%s[passed]  %s' % (green, end))
+        if (
+            fuzz.lower() in response.text.lower()
+        ):  # if fuzz string is reflected in the response
+            result = f"{green}[passed]  {end}"
         # if the server returned an error (Maybe WAF blocked it)
-        elif str(response.status_code)[:1] != '2':
-            result = ('%s[blocked] %s' % (red, end))
+        elif str(response.status_code)[:1] != "2":
+            result = f"{red}[blocked] {end}"
         else:  # if the fuzz string was not reflected in the response completely
-            result = ('%s[filtered]%s' % (yellow, end))
-        logger.info('%s %s' % (result, fuzz))
+            result = f"{yellow}[filtered]{end}"
+        logger.info(f"{result} {fuzz}")
